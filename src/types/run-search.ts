@@ -24,6 +24,8 @@ export type RunListSummary = {
   authorEmail: string | null;
   commitMessage: string | null;
   prTitle: string | null;
+  prNumber: number | null;
+  workflowRunUrl: string | null;
   createdAt: string;
   endedAt: string | null;
   durationMs: number | null;

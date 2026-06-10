@@ -13,6 +13,7 @@ import type {
 import type { UpdateProjectPayload } from "../types/project.js";
 import { parseAnalyticsQuery } from "../types/analytics.js";
 import { parseRunSearchQuery } from "../types/run-search.js";
+import { resolveWorkflowRunUrl } from "../utils/workflow-url.js";
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0]! : value;
 }
@@ -62,6 +63,8 @@ function summarizeRun(run: Awaited<ReturnType<IRunStore["getRun"]>>) {
     authorEmail: run.git.authorEmail,
     commitMessage: run.git.commitMessage,
     prTitle: run.ci.prTitle,
+    prNumber: run.ci.prNumber,
+    workflowRunUrl: resolveWorkflowRunUrl(run.ci, run.ciBuildId),
     createdAt: run.createdAt,
     endedAt: run.endedAt,
     durationMs: run.durationMs,

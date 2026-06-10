@@ -1,5 +1,6 @@
 import { latestTestCountSql } from "../latest-tests-sql.js";
 import { runDurationMsSql } from "../run-duration-sql.js";
+import { resolveWorkflowRunUrl } from "../../utils/workflow-url.js";
 import type { DbClient } from "../postgres-db-client.js";
 import type { CiInfo, GitInfo } from "../../types.js";
 import type { RunListSummary, RunSearchFilters, RunSearchResult } from "../../types/run-search.js";
@@ -62,6 +63,8 @@ function mapRow(row: SearchRow): RunListSummary {
     authorEmail: git.authorEmail,
     commitMessage: git.commitMessage,
     prTitle: ci.prTitle,
+    prNumber: ci.prNumber,
+    workflowRunUrl: resolveWorkflowRunUrl(ci, row.ci_build_id),
     createdAt: row.created_at,
     endedAt: row.ended_at,
     durationMs: row.duration_ms,
