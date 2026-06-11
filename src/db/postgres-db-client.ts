@@ -3,6 +3,19 @@ import { SCHEMA_SQL } from "./schema.js";
 
 const { Pool } = pg;
 
+/** RDS requires SSL; local Docker postgres does not. */
+function resolveSsl(
+  connectionString: string,
+): { rejectUnauthorized: boolean } | undefined {
+  const flag = process.env.DATABASE_SSL?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return undefined;
+  if (flag === "true" || flag === "1") return { rejectUnauthorized: false };
+  if (connectionString.includes("rds.amazonaws.com")) {
+    return { rejectUnauthorized: false };
+  }
+  return undefined;
+}
+
 export type DbClient = {
   migrate(): Promise<void>;
   close(): Promise<void>;
@@ -18,9 +31,11 @@ export class PostgresDbClient implements DbClient {
   private readonly pool: InstanceType<typeof Pool>;
 
   constructor(connectionString: string) {
+    const ssl = resolveSsl(connectionString);
     this.pool = new Pool({
       connectionString,
       max: 20,
+      ...(ssl ? { ssl } : {}),
     });
   }
 

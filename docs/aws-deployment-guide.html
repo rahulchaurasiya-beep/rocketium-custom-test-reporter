@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rocketium Playwright Reporter — AWS Deployment Guide</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --text: #1a1a2e;
+      --muted: #4a5568;
+      --border: #e2e8f0;
+      --accent: #2563eb;
+      --bg-code: #f7fafc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      line-height: 1.55;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 24px 32px 48px;
+      font-size: 11pt;
+    }
+    h1 {
+      font-size: 22pt;
+      margin: 0 0 8px;
+      line-height: 1.2;
+      color: #0f172a;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 10pt;
+      margin-bottom: 28px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid var(--border);
+    }
+    h2 {
+      font-size: 14pt;
+      margin: 28px 0 12px;
+      padding-top: 8px;
+      color: #0f172a;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 11.5pt;
+      margin: 18px 0 8px;
+      color: #1e293b;
+      page-break-after: avoid;
+    }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0; padding-left: 22px; }
+    li { margin: 4px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px;
+      font-size: 10pt;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 7px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f1f5f9; font-weight: 600; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 9pt;
+      background: var(--bg-code);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    pre {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 12px 14px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 8.5pt;
+      line-height: 1.45;
+      margin: 10px 0 14px;
+      page-break-inside: avoid;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+    .diagram {
+      margin: 16px 0 20px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fafbfc;
+      page-break-inside: avoid;
+    }
+    .diagram .mermaid { text-align: center; }
+    .toc { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin: 20px 0; }
+    .toc ol { margin: 0; }
+    .toc a { color: var(--accent); text-decoration: none; }
+    .callout {
+      background: #eff6ff;
+      border-left: 4px solid var(--accent);
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 6px 6px 0;
+      font-size: 10pt;
+    }
+    .checklist td:first-child { width: 28px; text-align: center; }
+    .page-break { page-break-before: always; }
+    @media print {
+      body { padding: 0; }
+      h2 { page-break-before: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<h1>Rocketium Playwright Reporter<br>AWS Deployment Guide</h1>
+<p class="meta">
+  <strong>Version:</strong> 1.0 &nbsp;|&nbsp;
+  <strong>Date:</strong> June 10, 2026<br>
+  <strong>Repos:</strong> playwright-reporter-backend · playwright-reporter-ui · automation-tests-2.0 · rocketium-playwright-reporter
+</p>
+
+<div class="toc">
+  <strong>Table of Contents</strong>
+  <ol>
+    <li>Overview</li>
+    <li>Architecture Diagram</li>
+    <li>What Each AWS Service Does</li>
+    <li>Step 1 — RDS PostgreSQL</li>
+    <li>Step 2 — S3 Bucket (Artifacts)</li>
+    <li>Step 3 — EC2 Backend</li>
+    <li>Step 4 — Frontend (S3 + CloudFront)</li>
+    <li>Step 5 — Connect Code &amp; Credentials</li>
+    <li>Step 6 — Verify End-to-End</li>
+    <li>AWS Topology Diagram</li>
+    <li>Environment Variables Reference</li>
+    <li>Troubleshooting</li>
+    <li>Security Groups &amp; Creation Order</li>
+  </ol>
+</div>
+
+<h2>1. Overview</h2>
+<p>The Playwright Reporter system has four parts:</p>
+<table>
+  <tr><th>Component</th><th>Repo</th><th>Role</th></tr>
+  <tr><td><strong>Backend API</strong></td><td>playwright-reporter-backend</td><td>Receives test results, stores metadata in Postgres, files in S3</td></tr>
+  <tr><td><strong>Dashboard UI</strong></td><td>playwright-reporter-ui</td><td>React app to view runs, manage projects, get API keys</td></tr>
+  <tr><td><strong>Reporter package</strong></td><td>rocketium-playwright-reporter</td><td>Playwright reporter that sends data to the backend</td></tr>
+  <tr><td><strong>Test suite</strong></td><td>automation-tests-2.0</td><td>E2E tests — configured to use the reporter in CI</td></tr>
+</table>
+<div class="callout">
+  <strong>Important:</strong> PostgreSQL and S3 work <em>together</em>, not as alternatives.
+  RDS stores run metadata; S3 stores binary artifacts (screenshots, videos, traces).
+</div>
+
+<h2>2. Architecture Diagram</h2>
+<div class="diagram">
+  <pre class="mermaid">
+flowchart TB
+  subgraph ci["CI / Playwright"]
+    R[playwright-rocketium-reporter]
+  end
+
+  subgraph aws["AWS"]
+    ALB[ALB / API URL]
+    BE[Backend Express :3000]
+    RDS[(RDS PostgreSQL)]
+    S3[(S3 bucket)]
+    CF[CloudFront]
+    UI[S3 static site]
+  end
+
+  R -->|POST /api/v1/runs/*| ALB
+  ALB --> BE
+  BE --> RDS
+  BE -->|upload/serve artifacts| S3
+  Browser --> CF
+  CF --> UI
+  CF -->|/api/*| ALB
+  </pre>
+</div>
+
+<h2>3. What Each AWS Service Does</h2>
+<table>
+  <tr><th>Layer</th><th>Stores</th><th>Backend env var</th></tr>
+  <tr><td><strong>RDS PostgreSQL</strong></td><td>Runs, shards, specs, tests, artifact pointers, users, projects</td><td><code>DATABASE_URL</code></td></tr>
+  <tr><td><strong>S3</strong></td><td>Screenshot / video / trace files</td><td><code>ARTIFACT_STORAGE=s3</code>, <code>AWS_S3_BUCKET</code>, <code>AWS_REGION</code></td></tr>
+  <tr><td><strong>EC2</strong></td><td>Runs Express API (no persistent files when using S3)</td><td><code>PORT</code>, <code>JWT_SECRET</code></td></tr>
+  <tr><td><strong>CloudFront + S3</strong></td><td>Built React UI (<code>dist/</code>)</td><td>None — static files only</td></tr>
+</table>
+<p>Schema is created automatically on backend startup (<code>CREATE TABLE IF NOT EXISTS</code> in <code>src/db/schema.ts</code>).</p>
+
+<h2 class="page-break">4. Step 1 — RDS PostgreSQL</h2>
+
+<h3>4.1 Create the database</h3>
+<ol>
+  <li>AWS Console → <strong>RDS</strong> → <strong>Create database</strong></li>
+  <li><strong>Engine:</strong> PostgreSQL <strong>16</strong></li>
+  <li><strong>Template:</strong> Free tier (or Dev/Test)</li>
+  <li><strong>DB instance identifier:</strong> <code>playwright-reporter-db</code></li>
+  <li><strong>Master username:</strong> <code>postgres</code></li>
+  <li><strong>Master password:</strong> choose a strong password (save it)</li>
+  <li><strong>DB name:</strong> <code>rocketium_e2e_runs</code></li>
+  <li><strong>Instance class:</strong> <code>db.t4g.micro</code> (or larger for production)</li>
+  <li><strong>Storage:</strong> 20 GB gp3</li>
+  <li><strong>VPC:</strong> same VPC you will use for EC2</li>
+  <li><strong>Public access:</strong> <strong>No</strong></li>
+  <li><strong>VPC security group:</strong> create new → e.g. <code>reporter-rds-sg</code></li>
+  <li>Create database</li>
+</ol>
+
+<h3>4.2 Security group (RDS)</h3>
+<table>
+  <tr><th>Type</th><th>Port</th><th>Source</th></tr>
+  <tr><td>PostgreSQL</td><td>5432</td><td>EC2 security group only</td></tr>
+</table>
+<p>Do <strong>not</strong> open port 5432 to <code>0.0.0.0/0</code>.</p>
+
+<h3>4.3 Note your connection string</h3>
+<pre><code>postgresql://postgres:YOUR_PASSWORD@&lt;rds-endpoint&gt;.region.rds.amazonaws.com:5432/rocketium_e2e_runs</code></pre>
+<p>URL-encode special characters in the password: <code>@</code> → <code>%40</code>, <code>#</code> → <code>%23</code>, <code>%</code> → <code>%25</code></p>
+<pre><code>postgresql://postgres:MyP%40ss%23word@playwright-reporter-db.xxxx.ap-south-1.rds.amazonaws.com:5432/rocketium_e2e_runs</code></pre>
+
+<h2>5. Step 2 — S3 Bucket (Artifacts)</h2>
+
+<h3>5.1 Create bucket</h3>
+<ol>
+  <li>AWS Console → <strong>S3</strong> → <strong>Create bucket</strong></li>
+  <li><strong>Name:</strong> e.g. <code>rocketium-playwright-artifacts</code></li>
+  <li><strong>Region:</strong> same as EC2 (e.g. <code>ap-south-1</code>)</li>
+  <li><strong>Block all public access:</strong> <strong>ON</strong></li>
+  <li>Create bucket</li>
+</ol>
+
+<h3>5.2 IAM policy for EC2</h3>
+<p>Create an IAM role for the EC2 instance:</p>
+<pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::rocketium-playwright-artifacts/artifacts/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::rocketium-playwright-artifacts",
+      "Condition": {
+        "StringLike": { "s3:prefix": ["artifacts/*"] }
+      }
+    }
+  ]
+}</code></pre>
+<p>Attach this role to EC2 so you <strong>don't need</strong> <code>AWS_ACCESS_KEY_ID</code> / <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>.</p>
+
+<h3>5.3 Values to save</h3>
+<table>
+  <tr><th>Variable</th><th>Example</th></tr>
+  <tr><td><code>AWS_REGION</code></td><td><code>ap-south-1</code></td></tr>
+  <tr><td><code>AWS_S3_BUCKET</code></td><td><code>rocketium-playwright-artifacts</code></td></tr>
+  <tr><td><code>AWS_S3_PREFIX</code></td><td><code>artifacts</code></td></tr>
+</table>
+
+<h2 class="page-break">6. Step 3 — EC2 Backend</h2>
+
+<h3>6.1 Launch EC2</h3>
+<ol>
+  <li><strong>AMI:</strong> Ubuntu 22.04 LTS</li>
+  <li><strong>Instance type:</strong> <code>t3.small</code> minimum</li>
+  <li><strong>VPC / subnet:</strong> same as RDS</li>
+  <li><strong>Security group (<code>reporter-api-sg</code>):</strong>
+    <ul>
+      <li>SSH 22 — your IP</li>
+      <li>HTTP 80 — <code>0.0.0.0/0</code> (or ALB SG only)</li>
+      <li>HTTPS 443 — <code>0.0.0.0/0</code> (or ALB SG only)</li>
+      <li>TCP 3000 — your IP only (dev; remove after Nginx)</li>
+    </ul>
+  </li>
+  <li>Attach IAM role from Step 5.2</li>
+  <li>Launch; note public IP or assign Elastic IP</li>
+</ol>
+
+<h3>6.2 Install dependencies on EC2</h3>
+<pre><code>ssh -i your-key.pem ubuntu@&lt;ec2-public-ip&gt;
+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo npm install -g pnpm
+
+git clone &lt;your-repo-url&gt;
+cd playwright-reporter-backend
+pnpm install
+pnpm build</code></pre>
+
+<h3>6.3 Create backend <code>.env</code> on EC2</h3>
+<pre><code>cd playwright-reporter-backend
+cp .env.example .env
+nano .env</code></pre>
+<p><strong>Production <code>.env</code> example:</strong></p>
+<pre><code>PORT=3000
+
+DATABASE_URL=postgresql://postgres:YOUR_ENCODED_PASSWORD@playwright-reporter-db.xxxx.ap-south-1.rds.amazonaws.com:5432/rocketium_e2e_runs
+
+ARTIFACT_STORAGE=s3
+AWS_REGION=ap-south-1
+AWS_S3_BUCKET=rocketium-playwright-artifacts
+AWS_S3_PREFIX=artifacts
+S3_ARTIFACT_URL_MODE=proxy
+S3_PRESIGN_EXPIRES_SEC=3600
+
+JWT_SECRET=&lt;generate-a-long-random-string-at-least-32-chars&gt;
+JWT_EXPIRES_IN=7d
+
+DATA_DIR=./data
+UPLOADS_DIR=./uploads</code></pre>
+
+<h3>6.4 Start and verify</h3>
+<pre><code>pnpm start
+curl http://localhost:3000/health</code></pre>
+<p>Expected response:</p>
+<pre><code>{
+  "ok": true,
+  "service": "playwright-reporter-backend",
+  "storage": "postgres",
+  "artifactStorage": "s3"
+}</code></pre>
+
+<h3>6.5 Run as a service (PM2)</h3>
+<pre><code>sudo npm install -g pm2
+pm2 start dist/index.js --name reporter-backend
+pm2 save
+pm2 startup</code></pre>
+
+<h3>6.6 Nginx reverse proxy (recommended)</h3>
+<p>Point <code>https://reports-api.yourcompany.com</code> → <code>localhost:3000</code>.</p>
+<p>Your <strong>API base URL</strong> for CI and tests:</p>
+<pre><code>https://reports-api.yourcompany.com</code></pre>
+
+<h2 class="page-break">7. Step 4 — Frontend (S3 + CloudFront)</h2>
+
+<h3>7.1 Build the UI</h3>
+<pre><code>cd playwright-reporter-ui
+pnpm install
+pnpm build</code></pre>
+<p>Output: <code>dist/</code> folder.</p>
+
+<h3>7.2 Upload to S3</h3>
+<ol>
+  <li>Create bucket: e.g. <code>rocketium-reporter-ui</code></li>
+  <li>Upload all files from <code>dist/</code></li>
+</ol>
+
+<h3>7.3 CloudFront distribution</h3>
+<table>
+  <tr><th>Path pattern</th><th>Origin</th></tr>
+  <tr><td><code>/api/*</code></td><td>API origin (EC2 / ALB)</td></tr>
+  <tr><td><code>/*</code> (default)</td><td>S3 UI bucket</td></tr>
+</table>
+<p>Set custom error 403/404 → <code>/index.html</code> for SPA routing.</p>
+<p>Custom domain: <code>reports.yourcompany.com</code> + ACM certificate.</p>
+<p>The UI calls <code>/api/ui/...</code> on the same domain — no frontend env vars needed in production.</p>
+
+<h2>8. Step 5 — Connect Code &amp; Credentials</h2>
+<p>After AWS infra is up, wire the application code.</p>
+
+<h3>8.1 Create project and get API key (Dashboard)</h3>
+<ol>
+  <li>Open <code>https://reports.yourcompany.com</code></li>
+  <li><strong>Sign up</strong> / <strong>Log in</strong></li>
+  <li><strong>Create project</strong> → e.g. "Rocketium Staging"</li>
+  <li>Copy from project settings:
+    <ul>
+      <li><strong>Project ID</strong> — e.g. <code>9gEjLh</code></li>
+      <li><strong>API Key</strong> — e.g. <code>rptr_live_f814f717...</code> (shown once — save immediately)</li>
+    </ul>
+  </li>
+</ol>
+
+<h3>8.2 Backend — no reporter keys in backend <code>.env</code></h3>
+<p>The backend validates per-project API keys from the database (created via UI). Backend needs only: <code>DATABASE_URL</code>, S3 vars, <code>JWT_SECRET</code>.</p>
+
+<h3>8.3 Local testing — <code>automation-tests-2.0/.env</code></h3>
+<pre><code>REPORTER_API_URL=https://reports-api.yourcompany.com
+REPORTER_API_KEY=rptr_live_your_key_here
+REPORTER_PROJECT_ID=9gEjLh
+REPORTER_TAGS=staging
+REPORTER_DEBUG=true</code></pre>
+<p>Read by <code>automation-tests-2.0/reporter.config.ts</code>:</p>
+<pre><code>apiUrl: env("REPORTER_API_URL") ?? DEFAULT_REPORTER_API_URL,
+apiKey: env("REPORTER_API_KEY"),
+projectId: env("REPORTER_PROJECT_ID") || "rocketium-staging",</code></pre>
+
+<h3>8.4 Playwright config</h3>
+<p>Reporter runs in CI when <code>REPORTER_API_URL</code> is set (<code>playwright.config.ts</code>):</p>
+<pre><code>const useRocketiumReporter =
+  process.env.CI && !process.env.DISABLE_REPORTER && !!reporterConfig.apiUrl?.trim();</code></pre>
+<p>For local runs with reporter, set <code>CI=true</code> or adjust that condition.</p>
+
+<h3>8.5 GitHub Actions secrets</h3>
+<p>Repository → <strong>Settings</strong> → <strong>Secrets and variables</strong> → <strong>Actions</strong>:</p>
+<table>
+  <tr><th>Secret name</th><th>Value</th></tr>
+  <tr><td><code>REPORTER_API_URL</code></td><td><code>https://reports-api.yourcompany.com</code></td></tr>
+  <tr><td><code>REPORTER_API_KEY</code></td><td><code>rptr_live_...</code> from UI</td></tr>
+</table>
+<p>In workflow YAML (e.g. <code>.github/workflows/staging-dynamic.yml</code>):</p>
+<pre><code>env:
+  REPORTER_API_URL: ${{ secrets.REPORTER_API_URL }}
+  REPORTER_API_KEY: ${{ secrets.REPORTER_API_KEY }}
+  REPORTER_PROJECT_ID: 9gEjLh
+  REPORTER_CI_BUILD_ID: ${{ github.run_id }}
+  REPORTER_SHARD_NUMBER: ${{ matrix.shard }}
+  REPORTER_EXPECTED_SHARD_COUNT: "12"
+  REPORTER_TAGS: staging</code></pre>
+
+<table>
+  <tr><th>Variable</th><th>Purpose</th></tr>
+  <tr><td><code>REPORTER_CI_BUILD_ID</code></td><td>Groups all shards into one run (<code>github.run_id</code>)</td></tr>
+  <tr><td><code>REPORTER_SHARD_NUMBER</code></td><td>Shard index (1, 2, 3…)</td></tr>
+  <tr><td><code>REPORTER_EXPECTED_SHARD_COUNT</code></td><td>Total shards for the run</td></tr>
+  <tr><td><code>REPORTER_TAGS</code></td><td>Labels shown in the dashboard</td></tr>
+</table>
+
+<h3>8.6 Data flow after wiring</h3>
+<div class="diagram">
+  <pre class="mermaid">
+sequenceDiagram
+  participant GH as GitHub Actions
+  participant PW as Playwright + Reporter
+  participant API as Backend EC2
+  participant DB as RDS PostgreSQL
+  participant S3 as S3 Bucket
+  participant UI as Dashboard UI
+
+  GH->>PW: Run tests with REPORTER_* env
+  PW->>API: POST /api/v1/runs/start
+  API->>DB: Insert run + shard
+  loop Each test
+    PW->>API: POST /api/v1/runs/tests
+    API->>DB: Insert test result
+    opt On failure
+      PW->>API: POST /api/v1/runs/artifacts
+      API->>S3: Upload file
+      API->>DB: Store s3 pointer
+    end
+  end
+  PW->>API: POST /api/v1/runs/shard/finish
+  API->>DB: Update run status
+  UI->>API: GET /api/ui/projects/.../runs
+  API->>DB: Query runs
+  UI->>API: GET artifacts file
+  API->>S3: Stream artifact
+  </pre>
+</div>
+
+<h2 class="page-break">9. Step 6 — Verify End-to-End</h2>
+<table class="checklist">
+  <tr><th>#</th><th>Check</th><th>How</th></tr>
+  <tr><td>1</td><td>RDS reachable from EC2</td><td><code>psql $DATABASE_URL</code> from EC2</td></tr>
+  <tr><td>2</td><td>Backend healthy</td><td><code>curl https://reports-api.../health</code></td></tr>
+  <tr><td>3</td><td>UI loads</td><td>Open <code>https://reports.yourcompany.com</code></td></tr>
+  <tr><td>4</td><td>Login works</td><td>Sign up / log in</td></tr>
+  <tr><td>5</td><td>Project created</td><td>Note Project ID + API key</td></tr>
+  <tr><td>6</td><td>CI secrets set</td><td><code>REPORTER_API_URL</code>, <code>REPORTER_API_KEY</code> in GitHub</td></tr>
+  <tr><td>7</td><td>Test run completes</td><td>Trigger staging workflow</td></tr>
+  <tr><td>8</td><td>Run appears in UI</td><td>Project → Runs list</td></tr>
+  <tr><td>9</td><td>Artifacts viewable</td><td>Open failed test → screenshot/video loads</td></tr>
+</table>
+
+<h3>Quick local verification</h3>
+<pre><code># Terminal 1
+cd playwright-reporter-backend && pnpm db:up && pnpm dev
+
+# Terminal 2
+cd playwright-reporter-ui && pnpm dev
+
+# Terminal 3
+cd automation-tests-2.0
+export REPORTER_API_URL=http://localhost:3000
+export REPORTER_API_KEY=rptr_live_...
+export REPORTER_PROJECT_ID=your-project-id
+export CI=true
+pnpm exec playwright test e2e/path/to/one.spec.ts</code></pre>
+
+<h2>10. AWS Topology Diagram</h2>
+<div class="diagram">
+  <pre class="mermaid">
+flowchart TB
+  Internet[Internet]
+  GH[GitHub Actions]
+  Browser[Browser]
+
+  subgraph vpc["VPC"]
+    EC2[EC2 Backend Express :3000]
+    RDS[(RDS PostgreSQL :5432 private)]
+  end
+
+  S3Art[(S3 artifacts bucket)]
+  S3UI[(S3 UI bucket)]
+  CF[CloudFront reports.yourcompany.com]
+  ALB[ALB optional]
+
+  GH -->|HTTPS POST /api/v1| ALB
+  ALB --> EC2
+  Browser --> CF
+  CF -->|/*| S3UI
+  CF -->|/api/*| ALB
+  EC2 --> RDS
+  EC2 --> S3Art
+  </pre>
+</div>
+
+<h2 class="page-break">11. Environment Variables Reference</h2>
+
+<h3>Backend (<code>playwright-reporter-backend/.env</code>)</h3>
+<table>
+  <tr><th>Variable</th><th>Required</th><th>Example</th></tr>
+  <tr><td><code>PORT</code></td><td>No</td><td><code>3000</code></td></tr>
+  <tr><td><code>DATABASE_URL</code></td><td><strong>Yes</strong></td><td><code>postgresql://postgres:...@rds.../rocketium_e2e_runs</code></td></tr>
+  <tr><td><code>ARTIFACT_STORAGE</code></td><td>Yes (prod)</td><td><code>s3</code></td></tr>
+  <tr><td><code>AWS_REGION</code></td><td>Yes (if s3)</td><td><code>ap-south-1</code></td></tr>
+  <tr><td><code>AWS_S3_BUCKET</code></td><td>Yes (if s3)</td><td><code>rocketium-playwright-artifacts</code></td></tr>
+  <tr><td><code>AWS_S3_PREFIX</code></td><td>No</td><td><code>artifacts</code></td></tr>
+  <tr><td><code>S3_ARTIFACT_URL_MODE</code></td><td>No</td><td><code>proxy</code> or <code>redirect</code></td></tr>
+  <tr><td><code>JWT_SECRET</code></td><td><strong>Yes</strong></td><td>long random string</td></tr>
+  <tr><td><code>JWT_EXPIRES_IN</code></td><td>No</td><td><code>7d</code></td></tr>
+</table>
+
+<h3>Test suite / CI (<code>automation-tests-2.0</code>)</h3>
+<table>
+  <tr><th>Variable</th><th>Required</th><th>Example</th></tr>
+  <tr><td><code>REPORTER_API_URL</code></td><td><strong>Yes</strong></td><td><code>https://reports-api.yourcompany.com</code></td></tr>
+  <tr><td><code>REPORTER_API_KEY</code></td><td><strong>Yes</strong></td><td><code>rptr_live_...</code></td></tr>
+  <tr><td><code>REPORTER_PROJECT_ID</code></td><td><strong>Yes</strong></td><td><code>9gEjLh</code></td></tr>
+  <tr><td><code>REPORTER_CI_BUILD_ID</code></td><td>CI</td><td><code>${{ github.run_id }}</code></td></tr>
+  <tr><td><code>REPORTER_SHARD_NUMBER</code></td><td>CI sharded</td><td><code>1</code></td></tr>
+  <tr><td><code>REPORTER_EXPECTED_SHARD_COUNT</code></td><td>CI sharded</td><td><code>12</code></td></tr>
+  <tr><td><code>REPORTER_TAGS</code></td><td>No</td><td><code>staging</code></td></tr>
+  <tr><td><code>REPORTER_DEBUG</code></td><td>No</td><td><code>true</code></td></tr>
+  <tr><td><code>DISABLE_REPORTER</code></td><td>No</td><td>set to skip reporter</td></tr>
+</table>
+
+<h3>Frontend (<code>playwright-reporter-ui</code>)</h3>
+<p>No production env vars — API calls use relative <code>/api/ui/...</code> via CloudFront proxy.</p>
+
+<h2>12. Troubleshooting</h2>
+<table>
+  <tr><th>Problem</th><th>Likely cause</th><th>Fix</th></tr>
+  <tr><td>DB connection fails</td><td>RDS SG blocks EC2</td><td>Allow 5432 from EC2 SG</td></tr>
+  <tr><td><code>artifactStorage: local</code></td><td><code>ARTIFACT_STORAGE</code> not set</td><td>Set <code>ARTIFACT_STORAGE=s3</code></td></tr>
+  <tr><td>Artifacts 404</td><td>IAM missing S3 permissions</td><td>Attach S3 policy to EC2 role</td></tr>
+  <tr><td>CI runs not in dashboard</td><td>Wrong URL / key / project</td><td>Match secrets to UI project</td></tr>
+  <tr><td>UI can't reach API</td><td>CloudFront <code>/api</code> not routed</td><td>Add behavior <code>/api/*</code> → API origin</td></tr>
+  <tr><td>Password auth fails</td><td>Special chars in password</td><td>URL-encode in <code>DATABASE_URL</code></td></tr>
+  <tr><td>Reporter not sending in CI</td><td><code>CI</code> not set or no <code>apiUrl</code></td><td>Set <code>REPORTER_API_URL</code> secret</td></tr>
+</table>
+
+<h2>Quick Reference — Deployment Order</h2>
+<pre><code>1. RDS PostgreSQL     → save DATABASE_URL
+2. S3 artifacts       → save bucket name + IAM role
+3. EC2 backend        → .env + pnpm start + Nginx
+4. S3 + CloudFront UI → build dist/, upload, route /api
+5. Dashboard          → create project, copy API key + project ID
+6. GitHub secrets     → REPORTER_API_URL, REPORTER_API_KEY
+7. CI workflow        → REPORTER_PROJECT_ID, shard vars
+8. Verify             → /health + run workflow + check UI</code></pre>
+
+<h2 class="page-break">13. Security Groups &amp; Creation Order</h2>
+
+<h3>13.1 Does S3 need a security group?</h3>
+<p><strong>No.</strong> S3 is not inside your VPC and does not use security groups. Access is controlled by:</p>
+<ul>
+  <li><strong>IAM role</strong> on EC2 (PutObject / GetObject)</li>
+  <li><strong>Bucket policy</strong> (optional)</li>
+  <li><strong>Block public access</strong> (keep ON)</li>
+</ul>
+<p>CloudFront also has no VPC security group — it is a global edge service.</p>
+
+<h3>13.2 What to create first?</h3>
+<p><strong>Yes — create security groups before (or while) creating ALB, EC2, and RDS.</strong> Recommended order:</p>
+<ol>
+  <li><strong>IAM role</strong> <code>reporter-ec2-role</code> — S3 access (no SG)</li>
+  <li><strong>S3 buckets</strong> — artifacts + UI static files (no SG)</li>
+  <li><strong>Security groups</strong> — create all 3 empty shells in the Default VPC:
+    <ul>
+      <li><code>sg-reporter-alb</code></li>
+      <li><code>sg-reporter-ec2</code></li>
+      <li><code>sg-reporter-rds</code></li>
+    </ul>
+  </li>
+  <li><strong>RDS</strong> — attach <code>sg-reporter-rds</code>, Public access = No</li>
+  <li><strong>EC2</strong> — attach <code>sg-reporter-ec2</code> + IAM role</li>
+  <li><strong>Add SG rules</strong> — RDS ← EC2, EC2 ← ALB (see tables below)</li>
+  <li><strong>ALB</strong> — attach <code>sg-reporter-alb</code>, target group → EC2:3000</li>
+  <li><strong>CloudFront</strong> — origins: S3 UI + ALB</li>
+  <li><strong>Backend .env</strong> + GitHub secrets</li>
+</ol>
+
+<h3>13.3 Security group diagram</h3>
+<div class="diagram">
+  <pre class="mermaid">
+flowchart TB
+  Internet["Internet<br/>GitHub Actions + Browser"]
+
+  subgraph vpc["Default VPC"]
+    subgraph sgAlbBox["sg-reporter-alb"]
+      ALB["Application Load Balancer<br/>:443 / :80"]
+    end
+
+    subgraph sgEc2Box["sg-reporter-ec2"]
+      EC2["EC2 Backend<br/>Express :3000"]
+    end
+
+    subgraph sgRdsBox["sg-reporter-rds"]
+      RDS["RDS PostgreSQL<br/>:5432 private"]
+    end
+  end
+
+  S3Art[("S3 rocketium-playwright-artifacts<br/>IAM only — no SG")]
+  S3UI[("S3 rocketium-reporter-ui<br/>IAM / OAC — no SG")]
+  CF["CloudFront reports.yourcompany.com<br/>no SG"]
+
+  Internet -->|"IN: 443, 80"| ALB
+  ALB -->|"OUT → IN: 3000"| EC2
+  EC2 -->|"OUT → IN: 5432"| RDS
+  EC2 -->|"OUT: 443 via IAM"| S3Art
+  Internet --> CF
+  CF --> S3UI
+  CF -->|"/api/*"| ALB
+  Internet -->|"HTTPS /api/v1"| ALB
+  </pre>
+</div>
+
+<h3>13.4 Security group rules (named)</h3>
+
+<h4>sg-reporter-alb</h4>
+<p>Attached to: <strong>Application Load Balancer</strong></p>
+<table>
+  <tr><th>Direction</th><th>Type</th><th>Port</th><th>Source / Destination</th><th>Purpose</th></tr>
+  <tr><td><strong>Inbound</strong></td><td>HTTPS</td><td>443</td><td><code>0.0.0.0/0</code></td><td>Browser + GitHub Actions hit API</td></tr>
+  <tr><td><strong>Inbound</strong></td><td>HTTP</td><td>80</td><td><code>0.0.0.0/0</code></td><td>Optional — redirect to HTTPS</td></tr>
+  <tr><td><strong>Outbound</strong></td><td>Custom TCP</td><td>3000</td><td><code>sg-reporter-ec2</code></td><td>Forward traffic to backend</td></tr>
+</table>
+
+<h4>sg-reporter-ec2</h4>
+<p>Attached to: <strong>EC2 instance</strong> (playwright-reporter-backend)</p>
+<table>
+  <tr><th>Direction</th><th>Type</th><th>Port</th><th>Source / Destination</th><th>Purpose</th></tr>
+  <tr><td><strong>Inbound</strong></td><td>Custom TCP</td><td>3000</td><td><code>sg-reporter-alb</code></td><td>Only ALB reaches the app</td></tr>
+  <tr><td><strong>Inbound</strong></td><td>SSH</td><td>22</td><td><code>YOUR_IP/32</code></td><td>Admin SSH only — not 0.0.0.0/0</td></tr>
+  <tr><td><strong>Outbound</strong></td><td>PostgreSQL</td><td>5432</td><td><code>sg-reporter-rds</code></td><td>Backend → database</td></tr>
+  <tr><td><strong>Outbound</strong></td><td>HTTPS</td><td>443</td><td><code>0.0.0.0/0</code></td><td>S3 API, package installs, AWS APIs</td></tr>
+</table>
+
+<h4>sg-reporter-rds</h4>
+<p>Attached to: <strong>RDS PostgreSQL</strong></p>
+<table>
+  <tr><th>Direction</th><th>Type</th><th>Port</th><th>Source / Destination</th><th>Purpose</th></tr>
+  <tr><td><strong>Inbound</strong></td><td>PostgreSQL</td><td>5432</td><td><code>sg-reporter-ec2</code></td><td>Only backend can query DB</td></tr>
+  <tr><td><strong>Outbound</strong></td><td>All traffic</td><td>All</td><td><code>0.0.0.0/0</code></td><td>Default (RDS rarely needs custom outbound)</td></tr>
+</table>
+
+<h3>13.5 S3 &amp; IAM (replaces security group for S3)</h3>
+<table>
+  <tr><th>Resource</th><th>Access control</th><th>Who needs access</th></tr>
+  <tr><td><code>rocketium-playwright-artifacts</code></td><td>IAM role <code>reporter-ec2-role</code> — s3:PutObject, s3:GetObject on <code>artifacts/*</code></td><td>EC2 backend only</td></tr>
+  <tr><td><code>rocketium-reporter-ui</code></td><td>CloudFront OAC + bucket policy (read-only for CloudFront)</td><td>CloudFront → public users</td></tr>
+</table>
+
+<h3>13.6 Traffic paths summary</h3>
+<table>
+  <tr><th>From</th><th>To</th><th>Path</th><th>Controlled by</th></tr>
+  <tr><td>Browser</td><td>UI static files</td><td>CloudFront → S3</td><td>CloudFront OAC</td></tr>
+  <tr><td>Browser</td><td>API</td><td>CloudFront <code>/api/*</code> → ALB → EC2</td><td>sg-reporter-alb + sg-reporter-ec2</td></tr>
+  <tr><td>GitHub Actions</td><td>API</td><td>HTTPS → ALB → EC2</td><td>sg-reporter-alb + sg-reporter-ec2</td></tr>
+  <tr><td>EC2</td><td>RDS</td><td>VPC private :5432</td><td>sg-reporter-rds + sg-reporter-ec2</td></tr>
+  <tr><td>EC2</td><td>S3 artifacts</td><td>HTTPS :443</td><td>IAM role (not SG)</td></tr>
+</table>
+
+<h3>13.7 AWS Console — create a security group</h3>
+<ol>
+  <li>EC2 → <strong>Security Groups</strong> → <strong>Create security group</strong></li>
+  <li>Name: e.g. <code>sg-reporter-rds</code>, VPC: <strong>Default VPC</strong> (same as RDS/EC2)</li>
+  <li>Add inbound/outbound rules from tables above</li>
+  <li>When referencing another SG, choose <strong>Source type = Security group</strong> and pick the peer SG by name</li>
+</ol>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "default",
+    securityLevel: "loose",
+    flowchart: { useMaxWidth: true, htmlLabels: true },
+    sequence: { useMaxWidth: true },
+  });
+</script>
+</body>
+</html>
